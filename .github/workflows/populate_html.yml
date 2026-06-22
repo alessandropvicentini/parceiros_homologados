@@ -1,0 +1,173 @@
+name: Populate HTML and Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - principal  # Ajustado para sua branch
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        pip install pandas openpyxl
+
+    - name: Download Excel files
+      run: |
+        # Links ajustados para a branch 'principal'
+        curl -L -o "Ser - Terceiros Homologados (3) (1).xlsx" "https://raw.githubusercontent.com/${{ github.repository }}/principal/Ser%20-%20Terceiros%20Homologados%20(3 )%20(1).xlsx"
+        curl -L -o "TORRE (3).xlsx" "https://raw.githubusercontent.com/${{ github.repository }}/principal/TORRE%20(3 ).xlsx"
+        curl -L -o "_Controle _ Parceiros (10).xlsx" "https://raw.githubusercontent.com/${{ github.repository }}/principal/_Controle%20_%20Parceiros%20(10 ).xlsx"
+        curl -L -o "TOP 2025.xlsx" "https://raw.githubusercontent.com/${{ github.repository }}/principal/TOP%202025.xlsx"
+        curl -L -o "TOP 2026.xlsx" "https://raw.githubusercontent.com/${{ github.repository }}/principal/TOP%202026.xlsx"
+
+    - name: Create process_data.py
+      run: |
+        cat << 'EOF' > process_data.py
+        import pandas as pd
+        import json
+        import os
+
+        def process_excel(file_path ):
+            if not os.path.exists(file_path):
+                return []
+            try:
+                df = pd.read_excel(file_path)
+                df = df.dropna(how='all')
+                for col in df.select_dtypes(include=['datetime64']).columns:
+                    df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                return df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Erro ao processar {file_path}: {e}")
+                return []
+
+        def main():
+            data_s = process_excel("Ser - Terceiros Homologados (3) (1).xlsx")
+            data_t = process_excel("TORRE (3).xlsx")
+            data_p = process_excel("_Controle _ Parceiros (10).xlsx")
+            data_h2025 = process_excel("TOP 2025.xlsx")
+            data_h2026 = process_excel("TOP 2026.xlsx")
+
+            with open("populated_data.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "s": {"raw": data_s, "fn": "Ser - Terceiros Homologados (3) (1).xlsx"},
+                    "t": {"raw": data_t, "fn": "TORRE (3).xlsx"},
+                    "p": {"raw": data_p, "fn": "_Controle _ Parceiros (10).xlsx"},
+                    "h2025": {"raw": data_h2025, "fn": "TOP 2025.xlsx"},
+                    "h2026": {"raw": data_h2026, "fn": "TOP 2026.xlsx"}
+                }, f, ensure_ascii=False, indent=2)
+
+        if __name__ == "__main__":
+            main()
+        EOF
+
+    - name: Create inject_data.py
+      run: |
+        cat << 'EOF' > inject_data.py
+        import json
+        import re
+        import os
+
+        def main():
+            with open("populated_data.json", "r", encoding="utf-8") as f:
+                injected_data = json.load(f)
+
+            with open("index.html", "r", encoding="utf-8") as f:
+                content = f.read()
+
+            injection_script = f"""
+        <script id="injected-data">
+        window.INJECTED_DATA = {{
+            s: {{ raw: {json.dumps(injected_data['s']['raw'])}, fn: '{injected_data['s']['fn']}' }},
+            t: {{ raw: {json.dumps(injected_data['t']['raw'])}, fn: '{injected_data['t']['fn']}' }},
+            p: {{ raw: {json.dumps(injected_data['p']['raw'])}, fn: '{injected_data['p']['fn']}' }},
+            h2025: {{ raw: {json.dumps(injected_data['h2025']['raw'])}, fn: '{injected_data['h2025']['fn']}' }},
+            h2026: {{ raw: {json.dumps(injected_data['h2026']['raw'])}, fn: '{injected_data['h2026']['fn']}' }}
+        }};
+        </script>
+        """
+            content = content.replace("</head>", f"{{injection_script}}</head>")
+            content = content.replace("restoreFromCache();", "if(window.INJECTED_DATA) loadInjectedData(); else restoreFromCache();")
+
+            load_function = """
+        function loadInjectedData() {
+            const data = window.INJECTED_DATA;
+            if(data.s.raw.length) {
+                D.s.raw = data.s.raw; D.s.fn = data.s.fn; D.s.fil = data.s.raw.slice();
+                setMeta('serName',null,'Relatório SER · '+D.s.fn);
+                document.getElementById('serMeta').textContent=D.s.raw.length+' registros (auto)';
+                setPil('pilSer','Carregado','ok'); setLine('lineSer','loaded');
+                document.getElementById('bSer').classList.remove('hidden');
+                document.getElementById('sec_kpi').classList.remove('hidden');
+                document.getElementById('sec_grf').classList.remove('hidden');
+                document.getElementById('sec_rnk').classList.remove('hidden');
+                renderTorre();
+            }
+            if(data.t.raw.length) {
+                D.t.raw = data.t.raw; D.t.fn = data.t.fn; D.t.cols = detMod(data.t.raw);
+                setMeta('torreName',null,'Torre · '+D.t.fn);
+                document.getElementById('torreMeta').textContent=D.t.raw.length+' · '+D.t.cols.length+' módulos (auto)';
+                setPil('pilTorre','Carregado','ok'); setLine('lineTorre','loaded');
+                document.getElementById('bTorre').classList.remove('hidden');
+            }
+            if(data.p.raw.length) {
+                D.p.raw = data.p.raw; D.p.fn = data.p.fn;
+                setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn,D.p.raw.length+' parceiros (auto)');
+                setPil('pilParc','Carregado','ok'); setLine('lineParc','loaded');
+                document.getElementById('homEmpty').classList.add('hidden');
+                document.getElementById('hom_view').classList.remove('hidden');
+                document.getElementById('hom_kpi').classList.remove('hidden');
+            }
+            if(data.h2025.raw.length) {
+                const mapped = mapHorasJson(data.h2025.raw, 2025);
+                D.h.y2025.raw = mapped.rows; D.h.y2025.fn = data.h2025.fn;
+                setMeta('h2025Name','h2025Meta','Relatório de Horas · '+D.h.y2025.fn, D.h.y2025.raw.length+' registros (auto)');
+                setPil('pilHoras2025','Carregado','ok'); setLine('lineHoras2025','loaded');
+                document.getElementById('bHoras2025').classList.remove('hidden');
+            }
+            if(data.h2026.raw.length) {
+                const mapped = mapHorasJson(data.h2026.raw, 2026);
+                D.h.y2026.raw = mapped.rows; D.h.y2026.fn = data.h2026.fn;
+                setMeta('h2026Name','h2026Meta','Relatório de Horas · '+D.h.y2026.fn, D.h.y2026.raw.length+' registros (auto)');
+                setPil('pilHoras2026','Carregado','ok'); setLine('lineHoras2026','loaded');
+                document.getElementById('bHoras2026').classList.remove('hidden');
+            }
+            if(D.h.y2025.raw.length || D.h.y2026.raw.length) {
+                mergeHorasYears(); updateYearSummary();
+                document.getElementById('hp_kpi').classList.remove('hidden');
+                document.getElementById('hp_grf').classList.remove('hidden');
+                renderHpFiltersBar(); applyHpFilters();
+            }
+        }
+        """
+            content = content.replace("function setupListeners()", f"{load_function}\\nfunction setupListeners()")
+
+            with open("index.html", "w", encoding="utf-8") as f:
+                f.write(content)
+
+        if __name__ == "__main__":
+            main()
+        EOF
+
+    - name: Execute data processing and injection
+      run: |
+        python process_data.py
+        python inject_data.py
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./
+        force_orphan: true
