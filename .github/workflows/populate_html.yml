@@ -97,18 +97,19 @@ jobs:
             }
             if(data.p && data.p.raw.length) {
                 D.p.raw = data.p.raw; D.p.fn = data.p.fn;
+                
+                // Prevenção de erro caso as variáveis não existam ainda
+                if(!D.p.reforma) D.p.reforma = [];
+                if(!D.p.statuses) D.p.statuses = [];
+                
                 setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn,D.p.raw.length+' parceiros (auto)');
                 setPil('pilParc','Carregado','ok'); setLine('lineParc','loaded');
                 if(document.getElementById('homEmpty')) document.getElementById('homEmpty').classList.add('hidden');
                 if(document.getElementById('hom_view')) document.getElementById('hom_view').classList.remove('hidden');
                 if(document.getElementById('hom_kpi')) document.getElementById('hom_kpi').classList.remove('hidden');
                 
-                // --- CORREÇÃO: Renderiza os cards e listas da Homologação ---
-                if(typeof renderHomFiltersBar === 'function') renderHomFiltersBar();
-                if(typeof applyHomFilters === 'function') applyHomFilters();
-                if(typeof renderHomKpis === 'function') renderHomKpis();
-                if(typeof renderHomCards === 'function') renderHomCards();
-                if(typeof renderParceiros === 'function') renderParceiros();
+                // MÁGICA AQUI: Chama as funções que você encontrou!
+                if(typeof renderParc === 'function') renderParc();
             }
             if(data.h2025 && data.h2025.raw.length) {
                 const mapped = mapHorasJson(data.h2025.raw, 2025);
