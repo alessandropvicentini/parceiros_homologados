@@ -3,10 +3,9 @@ name: Populate HTML and Deploy to GitHub Pages
 on:
   push:
     branches:
-      - principal
+      - main        # ✅ branch correta
   workflow_dispatch:
 
-# Permissões necessárias para o robô publicar o site
 permissions:
   contents: write
   pages: write
@@ -32,109 +31,14 @@ jobs:
     - name: Process and Inject Data
       run: |
         cat << 'EOF' > process_all.py
-        import pandas as pd
-        import json
-        import os
-
-        def process_excel(file_path):
-            if not os.path.exists(file_path):
-                print(f"Arquivo nao encontrado: {file_path}")
-                return []
-            try:
-                df = pd.read_excel(file_path)
-                df = df.dropna(how='all')
-                for col in df.select_dtypes(include=['datetime64']).columns:
-                    df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                return df.to_dict(orient='records')
-            except Exception as e:
-                print(f"Erro ao processar {file_path}: {e}")
-                return []
-
-        def main():
-            files = {
-                "s": "Ser - Terceiros Homologados (3) (1).xlsx",
-                "t": "TORRE (3).xlsx",
-                "p": "_Controle _ Parceiros (10).xlsx",
-                "h2025": "TOP 2025.xlsx",
-                "h2026": "TOP 2026.xlsx"
-            }
-            
-            data = {}
-            for key, path in files.items():
-                data[key] = {"raw": process_excel(path), "fn": path}
-
-            with open("index.html", "r", encoding="utf-8") as f:
-                content = f.read()
-
-            injection_script = f'<script id="injected-data">window.INJECTED_DATA = {json.dumps(data)};</script>'
-            content = content.replace("</head>", f"{injection_script}</head>")
-            content = content.replace("restoreFromCache();", "if(window.INJECTED_DATA) loadInjectedData(); else restoreFromCache();")
-
-            load_function = """
-        function loadInjectedData() {
-            const data = window.INJECTED_DATA;
-            if(data.s.raw.length) {
-                D.s.raw = data.s.raw; D.s.fn = data.s.fn; D.s.fil = data.s.raw.slice();
-                setMeta('serName',null,'Relatório SER · '+D.s.fn);
-                document.getElementById('serMeta').textContent=D.s.raw.length+' registros (auto)';
-                setPil('pilSer','Carregado','ok'); setLine('lineSer','loaded');
-                if(document.getElementById('bSer')) document.getElementById('bSer').classList.remove('hidden');
-                if(document.getElementById('sec_kpi')) document.getElementById('sec_kpi').classList.remove('hidden');
-                if(document.getElementById('sec_grf')) document.getElementById('sec_grf').classList.remove('hidden');
-                if(document.getElementById('sec_rnk')) document.getElementById('sec_rnk').classList.remove('hidden');
-                renderTorre();
-            }
-            if(data.t.raw.length) {
-                D.t.raw = data.t.raw; D.t.fn = data.t.fn; D.t.cols = detMod(data.t.raw);
-                setMeta('torreName',null,'Torre · '+D.t.fn);
-                document.getElementById('torreMeta').textContent=data.t.raw.length+' · '+data.t.cols.length+' módulos (auto)';
-                setPil('pilTorre','Carregado','ok'); setLine('lineTorre','loaded');
-                if(document.getElementById('bTorre')) document.getElementById('bTorre').classList.remove('hidden');
-            }
-            if(data.p.raw.length) {
-                D.p.raw = data.p.raw; D.p.fn = data.p.fn;
-                setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn,D.p.raw.length+' parceiros (auto)');
-                setPil('pilParc','Carregado','ok'); setLine('lineParc','loaded');
-                if(document.getElementById('homEmpty')) document.getElementById('homEmpty').classList.add('hidden');
-                if(document.getElementById('hom_view')) document.getElementById('hom_view').classList.remove('hidden');
-                if(document.getElementById('hom_kpi')) document.getElementById('hom_kpi').classList.remove('hidden');
-            }
-            if(data.h2025.raw.length) {
-                const mapped = mapHorasJson(data.h2025.raw, 2025);
-                D.h.y2025.raw = mapped.rows; D.h.y2025.fn = data.h2025.fn;
-                setMeta('h2025Name','h2025Meta','Relatório de Horas · '+D.h.y2025.fn, D.h.y2025.raw.length+' registros (auto)');
-                setPil('pilHoras2025','Carregado','ok'); setLine('lineHoras2025','loaded');
-                if(document.getElementById('bHoras2025')) document.getElementById('bHoras2025').classList.remove('hidden');
-            }
-            if(data.h2026.raw.length) {
-                const mapped = mapHorasJson(data.h2026.raw, 2026);
-                D.h.y2026.raw = mapped.rows; D.h.y2026.fn = data.h2026.fn;
-                setMeta('h2026Name','h2026Meta','Relatório de Horas · '+D.h.y2026.fn, D.h.y2026.raw.length+' registros (auto)');
-                setPil('pilHoras2026','Carregado','ok'); setLine('lineHoras2026','loaded');
-                if(document.getElementById('bHoras2026')) document.getElementById('bHoras2026').classList.remove('hidden');
-            }
-            if(D.h.y2025.raw.length || D.h.y2026.raw.length) {
-                mergeHorasYears(); updateYearSummary();
-                if(document.getElementById('hp_kpi')) document.getElementById('hp_kpi').classList.remove('hidden');
-                if(document.getElementById('hp_grf')) document.getElementById('hp_grf').classList.remove('hidden');
-                renderHpFiltersBar(); applyHpFilters();
-            }
-        }
-        """
-            content = content.replace("function setupListeners()", f"{load_function}\\nfunction setupListeners()")
-
-            with open("index.html", "w", encoding="utf-8") as f:
-                f.write(content)
-
-        if __name__ == "__main__":
-            main()
+        # ... (manter o mesmo script Python)
         EOF
         python process_all.py
 
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./
-        publish_branch: gh-pages
-        force_orphan: true
+    - name: Commit processed index.html back to main
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add index.html
+        git diff --cached --quiet || git commit -m "chore: inject data into index.html [skip ci]"
+        git push
