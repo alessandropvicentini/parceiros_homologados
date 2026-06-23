@@ -6,6 +6,12 @@ on:
       - principal
   workflow_dispatch:
 
+# Permissões necessárias para o robô publicar o site
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -45,7 +51,6 @@ jobs:
                 return []
 
         def main():
-            # Mapeamento dos arquivos conforme existem no seu repositorio
             files = {
                 "s": "Ser - Terceiros Homologados (3) (1).xlsx",
                 "t": "TORRE (3).xlsx",
@@ -62,7 +67,6 @@ jobs:
                 content = f.read()
 
             injection_script = f'<script id="injected-data">window.INJECTED_DATA = {json.dumps(data)};</script>'
-            
             content = content.replace("</head>", f"{injection_script}</head>")
             content = content.replace("restoreFromCache();", "if(window.INJECTED_DATA) loadInjectedData(); else restoreFromCache();")
 
@@ -83,7 +87,7 @@ jobs:
             if(data.t.raw.length) {
                 D.t.raw = data.t.raw; D.t.fn = data.t.fn; D.t.cols = detMod(data.t.raw);
                 setMeta('torreName',null,'Torre · '+D.t.fn);
-                document.getElementById('torreMeta').textContent=data.t.raw.length+' · '+D.t.cols.length+' módulos (auto)';
+                document.getElementById('torreMeta').textContent=data.t.raw.length+' · '+data.t.cols.length+' módulos (auto)';
                 setPil('pilTorre','Carregado','ok'); setLine('lineTorre','loaded');
                 if(document.getElementById('bTorre')) document.getElementById('bTorre').classList.remove('hidden');
             }
@@ -132,4 +136,5 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./
+        publish_branch: gh-pages
         force_orphan: true
