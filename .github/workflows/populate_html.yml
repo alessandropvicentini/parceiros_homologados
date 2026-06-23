@@ -34,6 +34,7 @@ jobs:
         import pandas as pd
         import json
         import os
+        import re
 
         def process_excel(file_path):
             if not os.path.exists(file_path):
@@ -50,6 +51,13 @@ jobs:
                 print(f"ERRO ao processar {file_path}: {e}")
                 return []
 
+        def get_col_val(row, *aliases):
+            for a in aliases:
+                for k, v in row.items():
+                    if a.lower() in k.lower():
+                        return str(v).strip() if pd.notnull(v) else ''
+            return ''
+
         def main():
             files = {
                 "s":     "Ser - Terceiros Homologados (3) (1).xlsx",
@@ -64,6 +72,47 @@ jobs:
                 rows = process_excel(path)
                 data[key] = {"raw": rows, "fn": path}
 
+            # Processamento Específico para Parceiros / Homologação (p)
+            if data["p"]["raw"]:
+                raw_parceiros = []
+                reforma_list = []
+                status_dict = {}
+
+                for row in data["p"]["raw"]:
+                    nome = get_col_val(row, 'parceiro', 'nome')
+                    status_desc = get_col_val(row, 'status')
+                    pendencia = get_col_val(row, 'pendencia')
+                    obs = get_col_val(row, 'obs')
+                    resp = get_col_val(row, 'responsavel', 'resp')
+                    loc = get_col_val(row, 'localidade')
+
+                    st_key = re.sub(r'[^a-zA-Z0-9]', '', status_desc.lower()) if status_desc else '__unknown__'
+                    
+                    if 'reforma' in status_desc.lower():
+                        reforma_list.append({
+                            'nome': nome, 'stKey': '__reforma__', 'pendencia': pendencia, 
+                            'observacao': obs, 'responsavel': resp, 'localidade': loc
+                        })
+                    else:
+                        raw_parceiros.append({
+                            'nome': nome, 'stKey': st_key, 'pendencia': pendencia, 
+                            'observacao': obs, 'responsavel': resp, 'localidade': loc,
+                            'stDesc': status_desc
+                        })
+                        if st_key not in status_dict:
+                            # Tenta adivinhar a cor baseando-se no texto, ou usa cinza padrão
+                            color = [96,165,250] if 'ativo' in st_key else [245,158,11] if 'pend' in st_key else [148,163,184]
+                            icon = '⚪'
+                            card_ico = '📌'
+                            status_dict[st_key] = {'key': st_key, 'label': status_desc, 'meta': {'short': status_desc.upper(), 'color': color, 'icon': icon, 'cardIco': card_ico}}
+
+                data["p"]["processed"] = {
+                    "raw": raw_parceiros,
+                    "reforma": reforma_list,
+                    "statuses": list(status_dict.values())
+                }
+
+
             with open("index.html", "r", encoding="utf-8") as f:
                 content = f.read()
 
@@ -77,111 +126,3 @@ jobs:
             load_function = """
         function loadInjectedData() {
             const data = window.INJECTED_DATA;
-            if(data.s && data.s.raw.length) {
-                D.s.raw = data.s.raw; D.s.fn = data.s.fn; D.s.fil = data.s.raw.slice();
-                setMeta('serName',null,'Relatório SER · '+D.s.fn);
-                document.getElementById('serMeta').textContent=D.s.raw.length+' registros (auto)';
-                setPil('pilSer','Carregado','ok'); setLine('lineSer','loaded');
-                if(document.getElementById('bSer')) document.getElementById('bSer').classList.remove('hidden');
-                if(document.getElementById('sec_kpi')) document.getElementById('sec_kpi').classList.remove('hidden');
-                if(document.getElementById('sec_grf')) document.getElementById('sec_grf').classList.remove('hidden');
-                if(document.getElementById('sec_rnk')) document.getElementById('sec_rnk').classList.remove('hidden');
-                renderTorre();
-            }
-            if(data.t && data.t.raw.length) {
-                D.t.raw = data.t.raw; D.t.fn = data.t.fn; D.t.cols = detMod(data.t.raw);
-                setMeta('torreName',null,'Torre · '+D.t.fn);
-                document.getElementById('torreMeta').textContent=data.t.raw.length+' · '+data.t.cols.length+' módulos (auto)';
-                setPil('pilTorre','Carregado','ok'); setLine('lineTorre','loaded');
-                if(document.getElementById('bTorre')) document.getElementById('bTorre').classList.remove('hidden');
-            }
-            if(data.p && data.p.raw.length) {
-                // --- MÁGICA DE TRANSFORMAÇÃO AQUI ---
-                // Pegamos a função exata do seu print para mastigar os dados antes de desenhar!
-                const rawExcel = data.p.raw;
-                D.p.raw = rawExcel.map(r => {
-                    const stDesc = String(r['STATUS'] || r['Status'] || '').trim();
-                    let stKey = '__unknown__';
-                    let stMeta = null;
-                    if(typeof STATUS_DEF !== 'undefined') {
-                        for(const st of STATUS_DEF) {
-                            if(stDesc.toUpperCase() === st.desc.toUpperCase()) { stKey = st.key; stMeta = st; break; }
-                        }
-                        if(stKey === '__unknown__') { 
-                            stKey = '__outros__'; 
-                            stMeta = STATUS_DEF.find(s => s.key === '__outros__'); 
-                        }
-                    }
-                    return {
-                        nome: String(r['PARCEIRO'] || r['Parceiro'] || ''),
-                        stDesc: stDesc,
-                        stKey: stKey,
-                        stMeta: stMeta,
-                        pendencia: String(r['PENDENCIA'] || r['Pendência'] || r['Pendencia'] || ''),
-                        observacao: String(r['OBS'] || r['Obs'] || r['Observação'] || ''),
-                        responsavel: String(r['RESPONSAVEL'] || r['Responsável'] || r['Responsavel'] || ''),
-                        localidade: String(r['LOCALIDADE'] || r['Localidade'] || '')
-                    };
-                });
-                
-                // Configurações obrigatórias que estavam no seu print
-                if(!D.p.reforma) D.p.reforma = [];
-                if(typeof STATUS_DEF !== 'undefined') D.p.statuses = STATUS_DEF;
-                D.p.activeFilter = 'all';
-                D.p.fn = data.p.fn;
-                // ------------------------------------
-
-                setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn, D.p.raw.length+' parceiros (auto)');
-                setPil('pilParc','Carregado','ok'); setLine('lineParc','loaded');
-                if(document.getElementById('homEmpty')) document.getElementById('homEmpty').classList.add('hidden');
-                if(document.getElementById('hom_view')) document.getElementById('hom_view').classList.remove('hidden');
-                if(document.getElementById('hom_kpi')) document.getElementById('hom_kpi').classList.remove('hidden');
-                
-                // Agora que os dados estão mastigados, podemos desenhar a tela!
-                if(typeof renderParc === 'function') renderParc();
-            }
-            if(data.h2025 && data.h2025.raw.length) {
-                const mapped = mapHorasJson(data.h2025.raw, 2025);
-                D.h.y2025.raw = mapped.rows; D.h.y2025.fn = data.h2025.fn;
-                setMeta('h2025Name','h2025Meta','Relatório de Horas · '+D.h.y2025.fn, D.h.y2025.raw.length+' registros (auto)');
-                setPil('pilHoras2025','Carregado','ok'); setLine('lineHoras2025','loaded');
-                if(document.getElementById('bHoras2025')) document.getElementById('bHoras2025').classList.remove('hidden');
-            }
-            if(data.h2026 && data.h2026.raw.length) {
-                const mapped = mapHorasJson(data.h2026.raw, 2026);
-                D.h.y2026.raw = mapped.rows; D.h.y2026.fn = data.h2026.fn;
-                setMeta('h2026Name','h2026Meta','Relatório de Horas · '+D.h.y2026.fn, D.h.y2026.raw.length+' registros (auto)');
-                setPil('pilHoras2026','Carregado','ok'); setLine('lineHoras2026','loaded');
-                if(document.getElementById('bHoras2026')) document.getElementById('bHoras2026').classList.remove('hidden');
-            }
-            if((data.h2025 && data.h2025.raw.length) || (data.h2026 && data.h2026.raw.length)) {
-                mergeHorasYears(); updateYearSummary();
-                if(document.getElementById('hp_kpi')) document.getElementById('hp_kpi').classList.remove('hidden');
-                if(document.getElementById('hp_grf')) document.getElementById('hp_grf').classList.remove('hidden');
-                renderHpFiltersBar(); applyHpFilters();
-            }
-        }
-        """
-            content = content.replace(
-                "function setupListeners()",
-                f"{load_function}\nfunction setupListeners()"
-            )
-
-            with open("index.html", "w", encoding="utf-8") as f:
-                f.write(content)
-
-            print("index.html atualizado com sucesso.")
-
-        if __name__ == "__main__":
-            main()
-        EOF
-        python process_all.py
-
-    - name: Commit processed index.html back to main
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add index.html
-        git diff --cached --quiet || git commit -m "chore: inject data into index.html [skip ci]"
-        git pull --rebase origin main
-        git push origin main
