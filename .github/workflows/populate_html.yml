@@ -35,7 +35,12 @@ jobs:
         import json
         import os
 
-        def process_excel(file_path):
+        def safe_str(val):
+            if val is None or (isinstance(val, float) and str(val) == 'nan'):
+                return ''
+            return str(val).strip()
+
+        def process_excel_simple(file_path):
             if not os.path.exists(file_path):
                 print(f"AVISO: Arquivo nao encontrado: {file_path}")
                 return []
@@ -50,24 +55,99 @@ jobs:
                 print(f"ERRO ao processar {file_path}: {e}")
                 return []
 
-        def main():
-            files = {
-                "s":     "Ser - Terceiros Homologados (3) (1).xlsx",
-                "t":     "TORRE (3).xlsx",
-                "p":     "_Controle _ Parceiros (10).xlsx",
-                "h2025": "TOP 2025.xlsx",
-                "h2026": "TOP 2026.xlsx"
-            }
+        def process_controle_parceiros(file_path):
+            if not os.path.exists(file_path):
+                print(f"AVISO: Arquivo nao encontrado: {file_path}")
+                return []
+            try:
+                # Aba Funcionais: linha 0 sao nomes internos, linha 1 e o cabecalho real
+                df_func = pd.read_excel(file_path, sheet_name='Funcionais', header=1)
+                df_func = df_func.dropna(how='all')
+                # Renomear colunas para nomes padronizados
+                col_map = {}
+                for col in df_func.columns:
+                    c = str(col).strip()
+                    if 'STATUS' in c.upper() or c == 'Unnamed: 0':
+                        col_map[col] = 'STATUS'
+                    elif 'PARCEIRO' in c.upper() or c == 'Unnamed: 2' or 'Torre' in c:
+                        col_map[col] = 'PARCEIRO'
+                    elif 'PENDENCIA' in c.upper() or 'PENDÊNCIA' in c.upper() or c == 'Unnamed: 3':
+                        col_map[col] = 'PENDENCIA'
+                    elif 'RESPONSAVEL' in c.upper() or 'RESPONSÁVEL' in c.upper() or c == 'Unnamed: 4':
+                        col_map[col] = 'RESPONSAVEL'
+                    elif 'LOCALIDADE' in c.upper() or c == 'Unnamed: 7':
+                        col_map[col] = 'LOCALIDADE'
+                    elif 'OBS' in c.upper() or c == 'Unnamed: 9':
+                        col_map[col] = 'OBS'
+                df_func = df_func.rename(columns=col_map)
 
-            data = {}
-            for key, path in files.items():
-                rows = process_excel(path)
-                data[key] = {"raw": rows, "fn": path}
+                # Aba Reforma: linha 0 e o cabecalho real
+                df_ref = pd.read_excel(file_path, sheet_name='Reforma', header=0)
+                df_ref = df_ref.dropna(how='all')
+                col_map2 = {}
+                for col in df_ref.columns:
+                    c = str(col).strip()
+                    if 'PARCEIRO' in c.upper() or c == 'Unnamed: 1':
+                        col_map2[col] = 'PARCEIRO'
+                    elif 'RESPONSAVEL' in c.upper() or 'RESPONSÁVEL' in c.upper() or c == 'Unnamed: 2':
+                        col_map2[col] = 'RESPONSAVEL'
+                    elif 'LOCALIDADE' in c.upper() or c == 'Unnamed: 7':
+                        col_map2[col] = 'LOCALIDADE'
+                    elif 'OBS' in c.upper() or c == 'Unnamed: 9':
+                        col_map2[col] = 'OBS'
+                    elif 'UF' in c.upper() or c == 'Unnamed: 8':
+                        col_map2[col] = 'UF'
+                df_ref = df_ref.rename(columns=col_map2)
+
+                rows_func = []
+                for _, row in df_func.iterrows():
+                    rows_func.append({
+                        'STATUS': safe_str(row.get('STATUS','')),
+                        'PARCEIRO': safe_str(row.get('PARCEIRO','')),
+                        'PENDENCIA': safe_str(row.get('PENDENCIA','')),
+                        'RESPONSAVEL': safe_str(row.get('RESPONSAVEL','')),
+                        'LOCALIDADE': safe_str(row.get('LOCALIDADE','')),
+                        'OBS': safe_str(row.get('OBS','')),
+                        '_aba': 'Funcionais'
+                    })
+
+                rows_ref = []
+                for _, row in df_ref.iterrows():
+                    rows_ref.append({
+                        'STATUS': 'REFORMA',
+                        'PARCEIRO': safe_str(row.get('PARCEIRO','')),
+                        'PENDENCIA': '',
+                        'RESPONSAVEL': safe_str(row.get('RESPONSAVEL','')),
+                        'LOCALIDADE': safe_str(row.get('LOCALIDADE','')) + ' ' + safe_str(row.get('UF','')),
+                        'OBS': safe_str(row.get('OBS','')),
+                        '_aba': 'Reforma'
+                    })
+
+                all_rows = rows_func + rows_ref
+                print(f"OK: {file_path} -> {len(rows_func)} funcionais + {len(rows_ref)} reforma = {len(all_rows)} total")
+                return all_rows
+            except Exception as e:
+                print(f"ERRO ao processar controle parceiros {file_path}: {e}")
+                return []
+
+        def main():
+            data = {
+                "s":     {"raw": process_excel_simple("Ser - Terceiros Homologados (3) (1).xlsx"),
+                          "fn":  "Ser - Terceiros Homologados (3) (1).xlsx"},
+                "t":     {"raw": process_excel_simple("TORRE (3).xlsx"),
+                          "fn":  "TORRE (3).xlsx"},
+                "p":     {"raw": process_controle_parceiros("_Controle _ Parceiros (10).xlsx"),
+                          "fn":  "_Controle _ Parceiros (10).xlsx"},
+                "h2025": {"raw": process_excel_simple("TOP 2025.xlsx"),
+                          "fn":  "TOP 2025.xlsx"},
+                "h2026": {"raw": process_excel_simple("TOP 2026.xlsx"),
+                          "fn":  "TOP 2026.xlsx"},
+            }
 
             with open("index.html", "r", encoding="utf-8") as f:
                 content = f.read()
 
-            injection_script = f'<script id="injected-data">window.INJECTED_DATA = {json.dumps(data)};</script>'
+            injection_script = f'<script id="injected-data">window.INJECTED_DATA = {json.dumps(data, ensure_ascii=False)};</script>'
             content = content.replace("</head>", f"{injection_script}\n</head>")
             content = content.replace(
                 "restoreFromCache();",
@@ -97,18 +177,12 @@ jobs:
             }
             if(data.p && data.p.raw.length) {
                 D.p.raw = data.p.raw; D.p.fn = data.p.fn;
-                setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn,D.p.raw.length+' parceiros (auto)');
+                setMeta('parcName','parcMeta','Controle de Parceiros · '+D.p.fn, D.p.raw.length+' parceiros (auto)');
                 setPil('pilParc','Carregado','ok'); setLine('lineParc','loaded');
                 if(document.getElementById('homEmpty')) document.getElementById('homEmpty').classList.add('hidden');
                 if(document.getElementById('hom_view')) document.getElementById('hom_view').classList.remove('hidden');
                 if(document.getElementById('hom_kpi')) document.getElementById('hom_kpi').classList.remove('hidden');
-                
-                // --- CORREÇÃO: Renderiza os cards e listas da Homologação ---
-                if(typeof renderHomFiltersBar === 'function') renderHomFiltersBar();
-                if(typeof applyHomFilters === 'function') applyHomFilters();
-                if(typeof renderHomKpis === 'function') renderHomKpis();
-                if(typeof renderHomCards === 'function') renderHomCards();
-                if(typeof renderParceiros === 'function') renderParceiros();
+                if(typeof renderParc === 'function') renderParc();
             }
             if(data.h2025 && data.h2025.raw.length) {
                 const mapped = mapHorasJson(data.h2025.raw, 2025);
@@ -153,5 +227,4 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add index.html
         git diff --cached --quiet || git commit -m "chore: inject data into index.html [skip ci]"
-        git pull --rebase origin main
-        git push origin main
+        git push
